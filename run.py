@@ -190,8 +190,6 @@ def start():
         status("swap successful!")
         return
     
-    if any(probability > 0.7 for probability in probabilities):
-        quit()
     video_name_full = target_path.split("/")[-1]
     video_name = os.path.splitext(video_name_full)[0]
     output_dir = os.path.dirname(target_path) + "/" + video_name

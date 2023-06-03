@@ -97,17 +97,7 @@ def pre_check():
     if '--all-faces' in sys.argv or '-a' in sys.argv:
         roop.globals.all_faces = True
 
-def pre_check_codeformer():
-    if '--upscale' in sys.argv or args['upscale']:
-        codeformer_model_path = os.path.join('codeformer', 'weights', 'codeformer', 'codeformer.pth')
-        facelib_model_path = os.path.join('codeformer', 'weights', 'facelib', 'detection_Resnet50_Final.pth')
-        facelib_model_path2 = os.path.join('codeformer', 'weights', 'facelib', 'parsing_parsenet.pth')
-        realesrgan_model_path = os.path.join('codeformer', 'weights', 'realesrgan', 'RealESRGAN_x2plus.pth')
-        if os.path.isfile(codeformer_model_path) and os.path.isfile(facelib_model_path) and os.path.isfile(facelib_model_path2) and os.path.isfile(realesrgan_model_path):
-            print("Passed model check")
-            pass
-        else:
-            quit("You are using --upscale flag but model files does not exist!") 
+
 
 def start_processing():
     frame_paths = args["frame_paths"]
@@ -186,7 +176,6 @@ def toggle_keep_frames():
 
 def toggle_upscale():
     args['upscale'] = int(upscale.get())
-    pre_check_codeformer()
 
 def save_file():
     filename, ext = 'output.mp4', '.mp4'
@@ -268,7 +257,6 @@ def run():
     global all_faces, keep_frames, limit_fps, status_label, window, upscale
 
     pre_check()
-    pre_check_codeformer()
     limit_resources()
 
     if args['source_img']:

@@ -63,4 +63,5 @@ def process_img(source_img, target_path, output_file):
     source_face = get_face_single(cv2.imread(source_img))
     result = get_face_swapper().get(frame, face, source_face, paste_back=True)
     cv2.imwrite(output_file, result)
-    print("\n\nImage saved as:", output_file, "\n\n")
+    
+

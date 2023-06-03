@@ -24,6 +24,8 @@ import roop.globals
 from roop.swapper import process_video, process_img
 from roop.utils import is_img, detect_fps, set_fps, create_video, add_audio, extract_frames, rreplace
 from roop.analyser import get_face_single
+from roop.upscale import upscale_img
+from roop.upscale import upscale_video
 
 if 'ROCMExecutionProvider' in roop.globals.providers:
     del torch
@@ -42,6 +44,7 @@ parser.add_argument('--keep-frames', help='keep frames directory', dest='keep_fr
 parser.add_argument('--max-memory', help='maximum amount of RAM in GB to be used', type=int)
 parser.add_argument('--max-cores', help='number of cores to be use for CPU mode', dest='cores_count', type=int, default=max(psutil.cpu_count() - 2, 2))
 parser.add_argument('--all-faces', help='swap all faces in frame', dest='all_faces', action='store_true', default=False)
+parser.add_argument('-u', '--upscale', help='upscale the face with codeformer', dest='upscale', action='store_true', default=False)
 
 for name, value in vars(parser.parse_args()).items():
     args[name] = value
@@ -113,6 +116,10 @@ def start_processing():
         pool.close()
         pool.join()
 
+def start_upscaling():
+    frame_paths = args["frame_paths"]
+    upscale_video(frame_paths)
+    return
 
 def preview_image(image_path):
     img = Image.open(image_path)
@@ -166,6 +173,8 @@ def toggle_all_faces():
 def toggle_keep_frames():
     args['keep_frames'] = int(keep_frames.get())
 
+def toggle_upscale():
+    args['upscale'] = int(upscale.get())
 
 def save_file():
     filename, ext = 'output.mp4', '.mp4'
@@ -203,6 +212,9 @@ def start():
         if predict_image(target_path) > 0.85:
             quit()
         process_img(args['source_img'], target_path, args['output_file'])
+        if args['upscale']:
+            upscale_img(args['output_file'])
+        print("\n\nImage saved as:", args['output_file'], "\n\n")
         status("swap successful!")
         return
     seconds, probabilities = predict_video_frames(video_path=args['target_path'], frame_interval=100)
@@ -228,6 +240,9 @@ def start():
     ))
     status("swapping in progress...")
     start_processing()
+    if args['upscale']:
+        status("upscaling in progress...")
+        start_upscaling()
     status("creating video...")
     create_video(video_name, exact_fps, output_dir)
     status("adding audio...")
@@ -238,7 +253,7 @@ def start():
 
 
 def run():
-    global all_faces, keep_frames, limit_fps, status_label, window
+    global all_faces, keep_frames, limit_fps, status_label, window, upscale
 
     pre_check()
     limit_resources()
@@ -280,6 +295,12 @@ def run():
     keep_frames = tk.IntVar(None, args['keep_frames'])
     frames_checkbox = tk.Checkbutton(window, anchor="w", relief="groove", activebackground="#2d3436", activeforeground="#74b9ff", selectcolor="black", text="Keep frames dir", fg="#dfe6e9", borderwidth=0, highlightthickness=0, bg="#2d3436", variable=keep_frames, command=toggle_keep_frames)
     frames_checkbox.place(x=60,y=450,width=240,height=31)
+
+    # Upscale checkbox
+    upscale = tk.IntVar(None, args['upscale'])
+    upscale_checkbox = tk.Checkbutton(window, anchor="w", relief="groove", activebackground="#2d3436", activeforeground="#74b9ff", selectcolor="black", text="Upscale(connot run with cpu)", fg="#dfe6e9", borderwidth=0, highlightthickness=0, bg="#2d3436", variable=upscale, command=toggle_upscale)
+    upscale_checkbox.place(x=360, y=450, width=240, height=31)
+
 
     # Start button
     start_button = tk.Button(window, text="Start", bg="#f1c40f", relief="flat", borderwidth=0, highlightthickness=0, command=lambda: [save_file(), start()])

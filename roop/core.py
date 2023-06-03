@@ -12,13 +12,12 @@ import torch
 from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog
-#from opennsfw2 import predict_video_frames, predict_image
+from opennsfw2 import predict_video_frames, predict_image
 from tkinter.filedialog import asksaveasfilename
 import webbrowser
 import psutil
 import cv2
 import threading
-import pkg_resources
 from PIL import Image, ImageTk
 
 import roop.globals
@@ -222,17 +221,17 @@ def start():
         print("\n[WARNING] No face detected in source image. Please try with another one.\n")
         return
     if is_img(target_path):
-        #if predict_image(target_path) > 0.85:
-        #    quit()
+        if predict_image(target_path) > 0.85:
+            quit()
         process_img(args['source_img'], target_path, args['output_file'])
         if args['upscale']:
             upscale_image(args['output_file'])
         print("\n\nImage saved as:", args['output_file'], "\n\n")
         status("swap successful!")
         return
-    #seconds, probabilities = predict_video_frames(video_path=args['target_path'], frame_interval=100)
-    #if any(probability > 0.85 for probability in probabilities):
-    #    quit()
+    seconds, probabilities = predict_video_frames(video_path=args['target_path'], frame_interval=100)
+    if any(probability > 0.85 for probability in probabilities):
+        quit()
     video_name_full = target_path.split("/")[-1]
     video_name = os.path.splitext(video_name_full)[0]
     output_dir = os.path.dirname(target_path) + "/" + video_name

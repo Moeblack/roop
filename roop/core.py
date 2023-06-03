@@ -44,7 +44,7 @@ parser.add_argument('--keep-frames', help='keep frames directory', dest='keep_fr
 parser.add_argument('--max-memory', help='maximum amount of RAM in GB to be used', type=int)
 parser.add_argument('--max-cores', help='number of cores to be use for CPU mode', dest='cores_count', type=int, default=max(psutil.cpu_count() - 2, 2))
 parser.add_argument('--all-faces', help='swap all faces in frame', dest='all_faces', action='store_true', default=False)
-parser.add_argument('-u', '--upscale', help='upscale the face with codeformer', dest='upscale', action='store_true', default=False)
+parser.add_argument('--upscale', help='upscale the face with codeformer', dest='upscale', action='store_true', default=False)
 
 for name, value in vars(parser.parse_args()).items():
     args[name] = value

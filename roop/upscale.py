@@ -2,10 +2,10 @@ import shutil
 from tqdm import tqdm
 from codeformer.app import inference_app
 
-def upscale_video(frame_paths):
+def Processing_swap(frame_paths):
     progress_bar_format = '{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}{postfix}]'
 
-    with tqdm(total=len(frame_paths), desc="Processing", unit="frame", dynamic_ncols=True, bar_format=progress_bar_format) as progress:
+    with tqdm(total=len(frame_paths), desc="Processing upscale", unit="frame", dynamic_ncols=True, bar_format=progress_bar_format) as progress:
         for frame_path in frame_paths:
             try:
                 result = inference_app(
@@ -21,7 +21,7 @@ def upscale_video(frame_paths):
                 pass
             progress.update(1)
 
-def upscale_img(output_file):
+def upscale_image(output_file):
      result = inference_app(
         image=output_file,
         background_enhance=True,

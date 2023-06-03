@@ -12,20 +12,21 @@ import torch
 from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog
-from opennsfw2 import predict_video_frames, predict_image
+#from opennsfw2 import predict_video_frames, predict_image
 from tkinter.filedialog import asksaveasfilename
 import webbrowser
 import psutil
 import cv2
 import threading
+import pkg_resources
 from PIL import Image, ImageTk
 
 import roop.globals
 from roop.swapper import process_video, process_img
 from roop.utils import is_img, detect_fps, set_fps, create_video, add_audio, extract_frames, rreplace
 from roop.analyser import get_face_single
-from roop.upscale import upscale_img
-from roop.upscale import upscale_video
+from roop.upscale import upscale_image
+from roop.upscale import Processing_swap
 
 if 'ROCMExecutionProvider' in roop.globals.providers:
     del torch
@@ -44,7 +45,7 @@ parser.add_argument('--keep-frames', help='keep frames directory', dest='keep_fr
 parser.add_argument('--max-memory', help='maximum amount of RAM in GB to be used', type=int)
 parser.add_argument('--max-cores', help='number of cores to be use for CPU mode', dest='cores_count', type=int, default=max(psutil.cpu_count() - 2, 2))
 parser.add_argument('--all-faces', help='swap all faces in frame', dest='all_faces', action='store_true', default=False)
-parser.add_argument('-u', '--upscale', help='upscale the face with codeformer', dest='upscale', action='store_true', default=False)
+parser.add_argument('--upscale', help='upscale the face with codeformer', dest='upscale', action='store_true', default=False)
 
 for name, value in vars(parser.parse_args()).items():
     args[name] = value
@@ -97,6 +98,17 @@ def pre_check():
     if '--all-faces' in sys.argv or '-a' in sys.argv:
         roop.globals.all_faces = True
 
+def pre_check_codeformer():
+    if '--upscale' in sys.argv or args['upscale']:
+        codeformer_model_path = os.path.join('codeformer', 'weights', 'codeformer', 'codeformer.pth')
+        facelib_model_path = os.path.join('codeformer', 'weights', 'facelib', 'detection_Resnet50_Final.pth')
+        facelib_model_path2 = os.path.join('codeformer', 'weights', 'facelib', 'parsing_parsenet.pth')
+        realesrgan_model_path = os.path.join('codeformer', 'weights', 'realesrgan', 'RealESRGAN_x2plus.pth')
+        if os.path.isfile(codeformer_model_path) and os.path.isfile(facelib_model_path) and os.path.isfile(facelib_model_path2) and os.path.isfile(realesrgan_model_path):
+            print("Passed model check")
+            pass
+        else:
+            quit("You are using --upscale flag but model files does not exist!") 
 
 def start_processing():
     frame_paths = args["frame_paths"]
@@ -118,7 +130,7 @@ def start_processing():
 
 def start_upscaling():
     frame_paths = args["frame_paths"]
-    upscale_video(frame_paths)
+    Processing_swap(frame_paths)
     return
 
 def preview_image(image_path):
@@ -175,6 +187,7 @@ def toggle_keep_frames():
 
 def toggle_upscale():
     args['upscale'] = int(upscale.get())
+    pre_check_codeformer()
 
 def save_file():
     filename, ext = 'output.mp4', '.mp4'
@@ -209,17 +222,17 @@ def start():
         print("\n[WARNING] No face detected in source image. Please try with another one.\n")
         return
     if is_img(target_path):
-        if predict_image(target_path) > 0.85:
-            quit()
+        #if predict_image(target_path) > 0.85:
+        #    quit()
         process_img(args['source_img'], target_path, args['output_file'])
         if args['upscale']:
-            upscale_img(args['output_file'])
+            upscale_image(args['output_file'])
         print("\n\nImage saved as:", args['output_file'], "\n\n")
         status("swap successful!")
         return
-    seconds, probabilities = predict_video_frames(video_path=args['target_path'], frame_interval=100)
-    if any(probability > 0.85 for probability in probabilities):
-        quit()
+    #seconds, probabilities = predict_video_frames(video_path=args['target_path'], frame_interval=100)
+    #if any(probability > 0.85 for probability in probabilities):
+    #    quit()
     video_name_full = target_path.split("/")[-1]
     video_name = os.path.splitext(video_name_full)[0]
     output_dir = os.path.dirname(target_path) + "/" + video_name
@@ -256,6 +269,7 @@ def run():
     global all_faces, keep_frames, limit_fps, status_label, window, upscale
 
     pre_check()
+    pre_check_codeformer()
     limit_resources()
 
     if args['source_img']:

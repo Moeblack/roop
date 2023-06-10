@@ -219,7 +219,7 @@ def start() -> None:
         restore_audio(roop.globals.target_path, roop.globals.output_path)
     else:
         move_temp(roop.globals.target_path, roop.globals.output_path)
-    # clean_temp(roop.globals.target_path)
+    clean_temp(roop.globals.target_path)
     if is_video(roop.globals.target_path):
         update_status('Swapping to video succeed!')
     else:

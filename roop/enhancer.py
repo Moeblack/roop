@@ -1,6 +1,5 @@
 import os
 import cv2
-import glob
 import numpy as np
 import torch
 import threading
@@ -43,7 +42,6 @@ if not os.path.exists("CodeFormer/weights/realesrgan/RealESRGAN_x2plus.pth"):
 CODE_FORMER = None
 THREAD_LOCK = threading.Lock()
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-# device = torch.device("cpu")
 ckpt_path = "CodeFormer/weights/CodeFormer/codeformer.pth"
 checkpoint = torch.load(ckpt_path)["params_ema"]
 

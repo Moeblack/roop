@@ -23,9 +23,10 @@ import cv2
 import roop.globals
 import roop.ui as ui
 from roop.swapper import process_video, process_image
-from roop.utilities import has_image_extention, is_image, is_video, detect_fps, create_video, extract_frames, get_temp_frames_paths, restore_audio, create_temp, move_temp, clean_temp
+import roop.face_enhancer
+from roop.utilities import has_image_extention, is_image, is_video, detect_fps, create_video, extract_frames, get_temp_frame_paths, restore_audio, create_temp, move_temp, clean_temp
 from roop.analyser import get_one_face
-import roop.face_enhancer 
+
 if 'ROCMExecutionProvider' in roop.globals.providers:
     del torch
 
@@ -44,11 +45,11 @@ def parse_args() -> None:
     parser.add_argument('--many-faces', help='swap every face in the frame', dest='many_faces', action='store_true', default=False)
     parser.add_argument('--video-encoder', help='adjust output video encoder', dest='video_encoder', default='libx264')
     parser.add_argument('--video-quality', help='adjust output video quality', dest='video_quality', type=int, default=18)
-    parser.add_argument('--max-memory', help='maximum amount of RAM in GB to be used', dest='max_memory', type=int)
-    parser.add_argument('--cpu-cores', help='number of CPU cores to use', dest='cpu_cores', type=int, default=max(psutil.cpu_count() / 2, 1))
-    parser.add_argument('--gpu-threads', help='number of threads to be use for the GPU', dest='gpu_threads', type=int, default=8)
+    parser.add_argument('--max-memory', help='maximum amount of RAM in GB to be used', dest='max_memory', type=int, default=suggest_max_memory())
+    parser.add_argument('--cpu-cores', help='number of CPU cores to use', dest='cpu_cores', type=int, default=suggest_cpu_cores())
+    parser.add_argument('--execution-provider', help='execution provider', dest='execution_provider', default='cpu', choices=['cpu', 'directml'])
+    parser.add_argument('--gpu-threads', help='number of threads to be use for the GPU', dest='gpu_threads', type=int, default=suggest_gpu_threads())
     parser.add_argument('--gpu-vendor', help='select your GPU vendor', dest='gpu_vendor', choices=['apple', 'amd', 'nvidia'])
-    parser.add_argument('--face-enhance', help='enhance face with codeformer', dest='face_enhance', action='store_true', default=False)
 
     args = parser.parse_known_args()[0]
 
@@ -62,36 +63,49 @@ def parse_args() -> None:
     roop.globals.many_faces = args.many_faces
     roop.globals.video_encoder = args.video_encoder
     roop.globals.video_quality = args.video_quality
-    roop.globals.face_enhance = args.face_enhance
+    roop.globals.max_memory = args.max_memory
+    roop.globals.cpu_cores = args.cpu_cores
+    roop.globals.gpu_threads = args.gpu_threads
 
-    if args.cpu_cores:
-        roop.globals.cpu_cores = int(args.cpu_cores)
-
-    # cpu thread fix for mac
-    if sys.platform == 'darwin':
-        roop.globals.cpu_cores = 1
-
-    if args.gpu_threads:
-        roop.globals.gpu_threads = int(args.gpu_threads)
-
-    # gpu thread fix for amd
-    if args.gpu_vendor == 'amd':
-        roop.globals.gpu_threads = 1
-
+    if args.execution_provider == 'directml':
+        roop.globals.providers = ['DmlExecutionProvider']
+        roop.globals.gpu_vendor = 'other'
     if args.gpu_vendor:
         roop.globals.gpu_vendor = args.gpu_vendor
     else:
         roop.globals.providers = ['CPUExecutionProvider']
 
 
-def limit_resources():
+def suggest_max_memory() -> int:
+    if platform.system().lower() == 'darwin':
+        return 4
+    return 16
+
+
+def suggest_gpu_threads() -> int:
+    if 'DmlExecutionProvider' in roop.globals.providers:
+        return 1
+    if 'ROCMExecutionProvider' in roop.globals.providers:
+        return 2
+    return 8
+
+
+def suggest_cpu_cores() -> int:
+    if platform.system().lower() == 'darwin':
+        return 2
+    return int(max(psutil.cpu_count() / 2, 1))
+
+
+def limit_resources() -> None:
     # prevent tensorflow memory leak
     gpus = tensorflow.config.experimental.list_physical_devices('GPU')
     for gpu in gpus:
         tensorflow.config.experimental.set_memory_growth(gpu, True)
     if roop.globals.max_memory:
-        memory = roop.globals.max_memory * 1024 * 1024 * 1024
-        if str(platform.system()).lower() == 'windows':
+        memory = roop.globals.max_memory * 1024 ** 3
+        if platform.system().lower() == 'darwin':
+            memory = roop.globals.max_memory * 1024 ** 6
+        if platform.system().lower() == 'windows':
             import ctypes
             kernel32 = ctypes.windll.kernel32
             kernel32.SetProcessWorkingSetSize(-1, ctypes.c_size_t(memory), ctypes.c_size_t(memory))
@@ -100,7 +114,7 @@ def limit_resources():
             resource.setrlimit(resource.RLIMIT_DATA, (memory, memory))
 
 
-def pre_check():
+def pre_check() -> None:
     if sys.version_info < (3, 9):
         quit('Python version is not supported - please upgrade to 3.9 or higher.')
     if not shutil.which('ffmpeg'):
@@ -127,45 +141,23 @@ def pre_check():
             quit(f'CUDNN version { torch.backends.cudnn.version()} is not supported - please downgrade to 8.9.1')
 
 
-def conditional_process_video(source_path: str, frame_paths: List[str]) -> None:
-    pool_amount = len(frame_paths) // roop.globals.cpu_cores
+def conditional_process_video(source_path: str, temp_frame_paths: List[str], process_video) -> None:
+    pool_amount = len(temp_frame_paths) // roop.globals.cpu_cores
     if pool_amount > 2 and roop.globals.cpu_cores > 1 and roop.globals.gpu_vendor is None:
-        update_status('Pool-Swapping in progress...')
-        global POOL
         POOL = multiprocessing.Pool(roop.globals.cpu_cores, maxtasksperchild=1)
         pools = []
-        for i in range(0, len(frame_paths), pool_amount):
-            pool = POOL.apply_async(process_video, args=(source_path, frame_paths[i:i + pool_amount]))
+        for i in range(0, len(temp_frame_paths), pool_amount):
+            pool = POOL.apply_async(process_video, args=(source_path, temp_frame_paths[i:i + pool_amount], 'cpu'))
             pools.append(pool)
         for pool in pools:
             pool.get()
         POOL.close()
         POOL.join()
     else:
-         update_status('Swapping in progress...')
-         process_video(roop.globals.source_path, frame_paths)
+         process_video(roop.globals.source_path, temp_frame_paths, 'gpu')
 
 
-# def conditional_process_enhance_video(source_path: str, frame_paths: List[str]) -> None:
-#     pool_amount = len(frame_paths) // roop.globals.cpu_cores
-#     if pool_amount > 2 and roop.globals.cpu_cores > 1 and roop.globals.gpu_vendor is None:
-#         update_status('Pool-Swapping in progress...')
-#         global POOL
-#         POOL = multiprocessing.Pool(roop.globals.cpu_cores, maxtasksperchild=1)
-#         pools = []
-#         for i in range(0, len(frame_paths), pool_amount):
-#             pool = POOL.apply_async(roop.face_enhancer.process_video, args=(frame_paths[i:i + pool_amount], roop.globals.gpu_threads))
-#             pools.append(pool)
-#         for pool in pools:
-#             pool.get()
-#         POOL.close()
-#         POOL.join()
-#     else:
-#          update_status('Swapping in progress...')
-#          roop.face_enhancer.process_video(frame_paths)
-
-
-def update_status(message: str):
+def update_status(message: str) -> None:
     value = 'Status: ' + message
     print(value)
     if not roop.globals.headless:
@@ -201,13 +193,16 @@ def start() -> None:
     create_temp(roop.globals.target_path)
     update_status('Extracting frames...')
     extract_frames(roop.globals.target_path)
-    frame_paths = get_temp_frames_paths(roop.globals.target_path)
-    conditional_process_video(roop.globals.source_path, frame_paths)
-    # prevent memory leak using ffmpeg with cuda
+    temp_frame_paths = get_temp_frame_paths(roop.globals.target_path)
+    update_status('Swapping in progress...')
+    conditional_process_video(roop.globals.source_path, temp_frame_paths, process_video)
     if roop.globals.gpu_vendor == 'nvidia':
         torch.cuda.empty_cache()
-    if roop.globals.face_enhance:
-        roop.face_enhancer.process_video(frame_paths)
+    update_status('enhancinging in progress...')
+    conditional_process_video(roop.globals.source_path, temp_frame_paths, roop.face_enhancer.process_video)
+    # prevent memory leak using ffmpeg with cuda
+    # if roop.globals.gpu_vendor == 'nvidia':
+    #     torch.cuda.empty_cache()
     if roop.globals.keep_fps:
         update_status('Detecting fps...')
         fps = detect_fps(roop.globals.target_path)
@@ -224,7 +219,7 @@ def start() -> None:
         restore_audio(roop.globals.target_path, roop.globals.output_path)
     else:
         move_temp(roop.globals.target_path, roop.globals.output_path)
-    clean_temp(roop.globals.target_path)
+    # clean_temp(roop.globals.target_path)
     if is_video(roop.globals.target_path):
         update_status('Swapping to video succeed!')
     else:

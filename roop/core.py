@@ -8,7 +8,7 @@ if any(arg.startswith('--execution-provider') for arg in sys.argv):
 # reduce tensorflow log level
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 import warnings
-from typing import List
+from typing import List, Any
 import platform
 import signal
 import shutil
@@ -26,6 +26,7 @@ import roop.globals
 import roop.ui as ui
 from roop.utilities import has_image_extension, is_image, is_video, detect_fps, create_video, extract_frames, get_temp_frame_paths, restore_audio, create_temp, move_temp, clean_temp
 from roop.analyser import get_one_face
+from roop.processors import get_frame_processor_modules, process_image, process_video
 
 if 'ROCMExecutionProvider' in roop.globals.execution_providers:
     del torch
@@ -39,7 +40,7 @@ def parse_args() -> None:
     parser.add_argument('-f', '--face', help='use a face image', dest='source_path')
     parser.add_argument('-t', '--target', help='replace image or video with face', dest='target_path')
     parser.add_argument('-o', '--output', help='save output to this file', dest='output_path')
-    parser.add_argument('--frame-processor', help='list of frame processors to run', dest='frame_processor', default=['face-swapper'], choices=['face-swapper', 'face-enhancer'], nargs='+')
+    parser.add_argument('--frame-processor', help='list of frame processors to run', dest='frame_processor', default=['face_swapper'], choices=['face_swapper', 'face_enhancer'], nargs='+')
     parser.add_argument('--keep-fps', help='maintain original fps', dest='keep_fps', action='store_true', default=False)
     parser.add_argument('--keep-audio', help='maintain original audio', dest='keep_audio', action='store_true', default=True)
     parser.add_argument('--keep-frames', help='keep frames directory', dest='keep_frames', action='store_true', default=False)
@@ -69,6 +70,9 @@ def parse_args() -> None:
     roop.globals.execution_providers = args.execution_provider
     roop.globals.execution_threads = args.execution_threads
 
+    if 'CUDAExecutionProvider' in roop.globals.execution_providers and 'face_enhancer' in roop.globals.frame_processors:
+        roop.globals.frame_processors.remove('face_enhancer')
+
 
 def suggest_max_memory() -> int:
     if platform.system().lower() == 'darwin':
@@ -90,19 +94,6 @@ def suggest_execution_threads() -> int:
     return 8
 
 
-def load_modules(processors: List[str]) -> List[str]:
-    loaded_modules = []
-    module_names = [f'roop.{module.split("-")[1]}' for module in processors]
-    try:
-        for module in module_names:
-            loaded_module = importlib.import_module(module)
-            loaded_modules.append(loaded_module)
-    except ImportError:
-        print('Failed when importing module: ImportError')
-        sys.exit()
-    return loaded_modules
-
-
 def limit_resources() -> None:
     # prevent tensorflow memory leak
     gpus = tensorflow.config.experimental.list_physical_devices('GPU')
@@ -121,11 +112,6 @@ def limit_resources() -> None:
             resource.setrlimit(resource.RLIMIT_DATA, (memory, memory))
 
 
-def release_resources() -> None:
-    if 'CUDAExecutionProvider' in roop.globals.execution_providers:
-        torch.cuda.empty_cache()
-
-
 def pre_check() -> None:
     if sys.version_info < (3, 9):
         quit('Python version is not supported - please upgrade to 3.9 or higher.')
@@ -133,22 +119,7 @@ def pre_check() -> None:
         quit('ffmpeg is not installed.')
 
 
-def conditional_process_video(source_path: str, temp_frame_paths: List[str], process_video) -> None:
-    pool_amount = len(temp_frame_paths) // roop.globals.cpu_cores
-    if pool_amount > 2 and roop.globals.cpu_cores > 1 and roop.globals.execution_providers == ['CPUExecutionProvider']:
-        POOL = multiprocessing.Pool(roop.globals.cpu_cores, maxtasksperchild=1)
-        pools = []
-        for i in range(0, len(temp_frame_paths), pool_amount):
-            pool = POOL.apply_async(process_video, args=(source_path, temp_frame_paths[i:i + pool_amount], 'multi-processing'))
-            pools.append(pool)
-        for pool in pools:
-            pool.get()
-        POOL.close()
-        POOL.join()
-    else:
-         process_video(roop.globals.source_path, temp_frame_paths, 'multi-threading')
-
-
+#del
 def update_status(message: str) -> None:
     value = 'Status: ' + message
     print(value)
@@ -171,12 +142,15 @@ def start() -> None:
     if has_image_extension(roop.globals.target_path):
         if predict_image(roop.globals.target_path) > 0.85:
             destroy()
+        process_image()
+        """ 
         if 'face-swapper' in roop.globals.frame_processors:
             update_status('Swapping in progress...')
-            roop.swapper.process_image(roop.globals.source_path, roop.globals.target_path, roop.globals.output_path)
+            processors.face_swapper.process_image(roop.globals.source_path, roop.globals.target_path, roop.globals.output_path)
         if 'CUDAExecutionProvider' in roop.globals.execution_providers and 'face-enhancer' in roop.globals.frame_processors:
             update_status('Enhancing in progress...')
-            roop.enhancer.process_image(roop.globals.source_path, roop.globals.target_path, roop.globals.output_path)
+            processors.face_enhancer.process_image(roop.globals.source_path, roop.globals.target_path, roop.globals.output_path)
+        """
         if is_image(roop.globals.target_path):
             update_status('Processing to image succeed!')
         else:
@@ -191,16 +165,18 @@ def start() -> None:
     update_status('Extracting frames...')
     extract_frames(roop.globals.target_path)
     temp_frame_paths = get_temp_frame_paths(roop.globals.target_path)
-    if 'face-swapper' in roop.globals.frame_processors:
-        update_status('Swapping in progress...')
-        conditional_process_video(roop.globals.source_path, temp_frame_paths, roop.swapper.process_video)
-    release_resources()
-    # limit to one execution thread
-    roop.globals.execution_threads = 1
-    if 'CUDAExecutionProvider' in roop.globals.execution_providers and 'face-enhancer' in roop.globals.frame_processors:
-        update_status('Enhancing in progress...')
-        conditional_process_video(roop.globals.source_path, temp_frame_paths, roop.enhancer.process_video)
-    release_resources()
+    process_video(temp_frame_paths)
+
+    # if 'face-swapper' in roop.globals.frame_processors:
+    #     update_status('Swapping in progress...')
+    #     conditional_process_video(roop.globals.source_path, temp_frame_paths, processors.face_swapper.process_video)
+    # release_resources()
+    # # limit to one execution thread
+    # roop.globals.execution_threads = 1
+    # if 'CUDAExecutionProvider' in roop.globals.execution_providers and 'face-enhancer' in roop.globals.frame_processors:
+    #     update_status('Enhancing in progress...')
+    #     conditional_process_video(roop.globals.source_path, temp_frame_paths, processors.face_enhancer.process_video)
+    # release_resources()
     if roop.globals.keep_fps:
         update_status('Detecting fps...')
         fps = detect_fps(roop.globals.target_path)
@@ -233,11 +209,7 @@ def destroy() -> None:
 def run() -> None:
     parse_args()
     pre_check()
-    load_modules(roop.globals.frame_processors)
-    if 'face-swapper' in roop.globals.frame_processors:
-        roop.swapper.pre_check()
-    if 'face-enhancer' in roop.globals.frame_processors:
-        roop.enhancer.pre_check()
+
     limit_resources()
     if roop.globals.headless:
         start()

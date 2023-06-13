@@ -140,11 +140,11 @@ def process_frames(source_path: str, frame_paths: list[str], progress=None) -> N
 
 def multi_process_frame(source_img, frame_paths, progress) -> None:
     threads = []
-    frames_per_thread = len(frame_paths) // roop.globals.gpu_threads
-    remaining_frames = len(frame_paths) % roop.globals.gpu_threads
+    frames_per_thread = len(frame_paths) // roop.globals.execution_threads
+    remaining_frames = len(frame_paths) % roop.globals.execution_threads
     start_index = 0
     # create threads by frames
-    for _ in range(roop.globals.gpu_threads):
+    for _ in range(roop.globals.execution_threads):
         end_index = start_index + frames_per_thread
         if remaining_frames > 0:
             end_index += 1
@@ -167,5 +167,5 @@ def process_video(source_path: str, frame_paths: list[str], mode: str) -> None:
             progress.set_postfix({'mode': mode, 'cores': roop.globals.cpu_cores, 'memory': roop.globals.max_memory})
             process_frames(source_path, frame_paths, progress)
         elif mode == 'gpu':
-            progress.set_postfix({'mode': mode, 'threads': roop.globals.gpu_threads, 'memory': roop.globals.max_memory})
+            progress.set_postfix({'mode': mode, 'threads': roop.globals.execution_threads, 'memory': roop.globals.max_memory})
             multi_process_frame(source_path, frame_paths, progress)

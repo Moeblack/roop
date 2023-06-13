@@ -56,10 +56,12 @@ def get_face_enhancer(FACE_ENHANCER):
 
 def enhance_face_in_frame(cropped_faces):
     try:
+        faces_enhanced = []
         for _, cropped_face in enumerate(cropped_faces):
             face_in_tensor = normalize_face(cropped_face)
-            faces_enhanced = restore_face(face_in_tensor)
-            return faces_enhanced
+            face_enhanced = restore_face(face_in_tensor)
+            faces_enhanced.append(face_enhanced)
+        return faces_enhanced
     except RuntimeError as error:
         print(f'Failed inference for CodeFormer-code: {error}')
 
